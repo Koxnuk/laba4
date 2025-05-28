@@ -8,3 +8,5 @@
 ![image](https://github.com/user-attachments/assets/f6f0db37-49c8-4892-bdd5-cca7c2283a7d)
 
 ![image](https://github.com/user-attachments/assets/3044fe0c-6e75-4349-834d-ccd9bd1da8b7)
+
+на данных снимках экрана мы можем наблюдать что кеширование происходит корректно так как скорость обработки запроса стала на порядок выше 
