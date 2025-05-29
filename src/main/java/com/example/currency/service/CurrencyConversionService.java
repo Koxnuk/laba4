@@ -1,9 +1,12 @@
 package com.example.currency.service;
 
-import com.example.currency.cache.SimpleCache;
+import com.example.currency.exception.ApiException;
 import com.example.currency.models.CurrencyRate;
 import com.example.currency.repository.CurrencyRateRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -14,118 +17,74 @@ import java.util.Optional;
 
 @Service
 public class CurrencyConversionService {
-
-    private final CurrencyService currencyService;
-    private final CurrencyRateRepository currencyRateRepository;
-    private final SimpleCache cacheService;
+    private static final Logger logger = LoggerFactory.getLogger(CurrencyConversionService.class);
+    private final CurrencyRateRepository rateRepository;
 
     @Autowired
-    public CurrencyConversionService(
-            CurrencyService currencyService,
-            CurrencyRateRepository currencyRateRepository,
-            SimpleCache cacheService
-    ) {
-        this.currencyService = currencyService;
-        this.currencyRateRepository = currencyRateRepository;
-        this.cacheService = cacheService;
+    public CurrencyConversionService(CurrencyRateRepository rateRepository) {
+        this.rateRepository = rateRepository;
     }
 
-    public BigDecimal convertCurrency(Integer fromCurId, Integer toCurId, BigDecimal amount) {
-        String cacheKey = "convert:" + fromCurId + ":" + toCurId + ":" + amount.toString();
-        Optional<Object> cached = cacheService.get(cacheKey);
-        if (cached.isPresent()) {
-            return (BigDecimal) cached.get();
+    public BigDecimal convertCurrency(Integer fromId, Integer toId, BigDecimal amount) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            logger.error("Недопустимая сумма для конвертации: {}", amount);
+            throw new ApiException("Сумма должна быть больше нуля", HttpStatus.BAD_REQUEST);
         }
 
-        CurrencyRate fromRate = currencyService.getCurrencyRate(fromCurId);
-        CurrencyRate toRate = currencyService.getCurrencyRate(toCurId);
+        Optional<CurrencyRate> fromRateOpt = rateRepository.findById((long) fromId);
+        Optional<CurrencyRate> toRateOpt = rateRepository.findById((long) toId);
 
-        BigDecimal fromRatePerUnit = fromRate.getCurOfficialRate()
-                .divide(BigDecimal.valueOf(fromRate.getCurScale()), 6, RoundingMode.HALF_UP);
+        if (fromRateOpt.isEmpty() || toRateOpt.isEmpty()) {
+            logger.error("Валюты с ID {} или {} не найдены", fromId, toId);
+            throw new ApiException("Одна из валют не найдена", HttpStatus.NOT_FOUND);
+        }
 
-        BigDecimal toRatePerUnit = toRate.getCurOfficialRate()
-                .divide(BigDecimal.valueOf(toRate.getCurScale()), 6, RoundingMode.HALF_UP);
+        CurrencyRate fromRate = fromRateOpt.get();
+        CurrencyRate toRate = toRateOpt.get();
 
-        BigDecimal result = amount.multiply(fromRatePerUnit)
-                .divide(toRatePerUnit, 2, RoundingMode.HALF_UP);
+        if (fromRate.getRate() == null || toRate.getRate() == null) {
+            logger.error("Курс для валюты с ID {} или {} равен null", fromId, toId);
+            throw new ApiException("Курс валюты отсутствует", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
 
-        cacheService.put(cacheKey, result);
+        if (fromRate.getRate().compareTo(BigDecimal.ZERO) <= 0 || toRate.getRate().compareTo(BigDecimal.ZERO) <= 0) {
+            logger.error("Недопустимые курсы для валют с ID {} или {}", fromId, toId);
+            throw new ApiException("Недопустимые курсы валют", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+
+        BigDecimal result = amount.multiply(toRate.getRate()).divide(fromRate.getRate(), 4, RoundingMode.HALF_UP);
+        logger.info("Конвертация выполнена: {} {} -> {} {}", amount, fromId, result, toId);
         return result;
     }
 
-    public CurrencyRate createRate(CurrencyRate rate) {
-        CurrencyRate savedRate = currencyRateRepository.save(rate);
-        String cacheKey = generateCacheKey(rate.getCurrency().getCurAbbreviation(), rate.getDate());
-        cacheService.put(cacheKey, List.of(savedRate));
-        return savedRate;
-    }
-
     public List<CurrencyRate> getAllRates() {
-        String cacheKey = "allRates";
-        Optional<Object> cached = cacheService.get(cacheKey);
-        if (cached.isPresent()) {
-            return (List<CurrencyRate>) cached.get();
-        }
-
-        List<CurrencyRate> rates = currencyRateRepository.findAll();
-        cacheService.put(cacheKey, rates);
-        return rates;
+        return rateRepository.findAll();
     }
 
     public Optional<CurrencyRate> getRateById(Long id) {
-        String cacheKey = "rateById:" + id;
-        Optional<Object> cached = cacheService.get(cacheKey);
-        if (cached.isPresent()) {
-            return Optional.of((CurrencyRate) cached.get());
-        }
-
-        Optional<CurrencyRate> rate = currencyRateRepository.findById(id);
-        rate.ifPresent(r -> cacheService.put(cacheKey, r));
-        return rate;
+        return rateRepository.findById(id);
     }
 
-    public CurrencyRate updateRate(Long id, CurrencyRate updatedRate) {
-        Optional<CurrencyRate> existingRate = currencyRateRepository.findById(id);
-        if (existingRate.isPresent()) {
-            CurrencyRate rate = existingRate.get();
-            rate.setCurOfficialRate(updatedRate.getCurOfficialRate());
-            rate.setCurScale(updatedRate.getCurScale());
-            rate.setDate(updatedRate.getDate());
-            rate.setCurrency(updatedRate.getCurrency());
-            CurrencyRate savedRate = currencyRateRepository.save(rate);
-            String cacheKey = generateCacheKey(rate.getCurrency().getCurAbbreviation(), rate.getDate());
-            cacheService.put(cacheKey, List.of(savedRate));
-            cacheService.remove("rateById:" + id);
-            return savedRate;
+    public CurrencyRate createRate(CurrencyRate rate) {
+        if (rate.getRate() == null || rate.getRate().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ApiException("Курс должен быть больше нуля", HttpStatus.BAD_REQUEST);
         }
-        throw new RuntimeException("Rate not found with id: " + id);
+        return rateRepository.save(rate);
+    }
+
+    public CurrencyRate updateRate(Long id, CurrencyRate rate) {
+        if (rate.getRate() == null || rate.getRate().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ApiException("Курс должен быть больше нуля", HttpStatus.BAD_REQUEST);
+        }
+        rate.setId(id);
+        return rateRepository.save(rate);
     }
 
     public void deleteRate(Long id) {
-        Optional<CurrencyRate> rate = currencyRateRepository.findById(id);
-        if (rate.isPresent()) {
-            String cacheKey = generateCacheKey(rate.get().getCurrency().getCurAbbreviation(), rate.get().getDate());
-            currencyRateRepository.deleteById(id);
-            cacheService.remove(cacheKey);
-            cacheService.remove("rateById:" + id);
-        } else {
-            throw new RuntimeException("Rate not found with id: " + id);
-        }
+        rateRepository.deleteById(id);
     }
 
     public List<CurrencyRate> getRatesByAbbreviationAndDate(String abbreviation, LocalDate date) {
-        String cacheKey = generateCacheKey(abbreviation, date);
-        Optional<Object> cached = cacheService.get(cacheKey);
-        if (cached.isPresent()) {
-            return (List<CurrencyRate>) cached.get();
-        }
-
-        List<CurrencyRate> rates = currencyRateRepository.findByCurrencyAbbreviationAndDate(abbreviation, date);
-        cacheService.put(cacheKey, rates);
-        return rates;
-    }
-
-    private String generateCacheKey(String abbreviation, LocalDate date) {
-        return "rates:" + abbreviation + ":" + date.toString();
+        return rateRepository.findByAbbreviationAndDate(abbreviation, date);
     }
 }
