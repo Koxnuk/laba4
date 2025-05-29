@@ -80,7 +80,7 @@ public class CurrencyService {
 
     public CurrencyInfo createCurrency(CurrencyInfo currencyInfo) {
         CurrencyInfo saved = currencyInfoRepository.save(currencyInfo);
-        cacheService.clear(); // Очищаем кэш при изменении данных
+        cacheService.clear();
         return saved;
     }
 
@@ -117,7 +117,7 @@ public class CurrencyService {
             currency.setCurName(updatedCurrency.getCurName());
             currency.setCurScale(updatedCurrency.getCurScale());
             CurrencyInfo saved = currencyInfoRepository.save(currency);
-            cacheService.clear(); // Очищаем кэш при обновлении
+            cacheService.clear();
             return saved;
         }
         throw new RuntimeException("Currency not found with id: " + id);
@@ -125,6 +125,6 @@ public class CurrencyService {
 
     public void deleteCurrency(Integer id) {
         currencyInfoRepository.deleteById(id);
-        cacheService.clear(); // Очищаем кэш при удалении
+        cacheService.clear();
     }
 }

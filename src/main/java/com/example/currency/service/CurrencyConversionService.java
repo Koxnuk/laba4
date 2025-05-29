@@ -95,7 +95,7 @@ public class CurrencyConversionService {
             CurrencyRate savedRate = currencyRateRepository.save(rate);
             String cacheKey = generateCacheKey(rate.getCurrency().getCurAbbreviation(), rate.getDate());
             cacheService.put(cacheKey, List.of(savedRate));
-            cacheService.remove("rateById:" + id); // Очищаем кэш для getRateById
+            cacheService.remove("rateById:" + id);
             return savedRate;
         }
         throw new RuntimeException("Rate not found with id: " + id);
@@ -107,7 +107,7 @@ public class CurrencyConversionService {
             String cacheKey = generateCacheKey(rate.get().getCurrency().getCurAbbreviation(), rate.get().getDate());
             currencyRateRepository.deleteById(id);
             cacheService.remove(cacheKey);
-            cacheService.remove("rateById:" + id); // Очищаем кэш для getRateById
+            cacheService.remove("rateById:" + id);
         } else {
             throw new RuntimeException("Rate not found with id: " + id);
         }
